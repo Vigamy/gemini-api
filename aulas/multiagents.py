@@ -314,6 +314,29 @@ fewshots_orquestrador = FewShotChatMessagePromptTemplate(
     example_prompt=example_prompt_base,
 )
 
+prompt_roteador = ChatPromptTemplate.from_messages([
+    system_prompt_roteador,
+    fewshots_roteador,
+    MessagesPlaceholder("chat_history"),
+    ("human", "{input}"),
+]).partial(today_local=today.isoformat())
+
+prompt_financeiro = ChatPromptTemplate.from_messages([
+    system_prompt_financeiro,
+    fewshots_financeiro,
+    MessagesPlaceholder("chat_history"),
+    ("human", "{input}"),
+    MessagesPlaceholder("agent_scratchpad"),
+]).partial(today_local=today.isoformat())
+
+prompt_agenda = ChatPromptTemplate.from_messages([
+    system_prompt_agenda,
+    fewshots_agenda,
+    MessagesPlaceholder("chat_history"),
+    ("human", "{input}"),
+    MessagesPlaceholder("agent_scratchpad"),
+]).partial(today_local=today.isoformat())
+
 while True:
     user_input = input("> ")
     if user_input.lower() in ('sair', 'exit', 'quit', 'tchau'):
