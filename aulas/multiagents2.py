@@ -13,7 +13,7 @@ from langchain_core.prompts import (
 )
 from langchain.prompts.few_shot import FewShotChatMessagePromptTemplate
 from langchain.agents import create_tool_calling_agent, AgentExecutor
-from aulas.pg_tools import TOOLS
+from pg_tools import TOOLS
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -35,6 +35,13 @@ genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 llm_fast = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         temperature=0,
+        top_p=0.95,
+        google_api_key=os.getenv("GEMINI_API_KEY"),
+    )
+
+llm = ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        temperature=0.7,
         top_p=0.95,
         google_api_key=os.getenv("GEMINI_API_KEY"),
     )
@@ -314,6 +321,16 @@ fewshots_orquestrador = FewShotChatMessagePromptTemplate(
     example_prompt=example_prompt_base,
 )
 
+
+# --------------- Template dos prompts ---------------
+
+prompt_orquestrador = ChatPromptTemplate.from_messages([
+    system_prompt_orquestrador,
+    fewshots_orquestrador,
+    MessagesPlaceholder("chat_history"),
+    ("human", "{input}"),
+]).partial(today_local=today.isoformat())
+
 prompt_roteador = ChatPromptTemplate.from_messages([
     system_prompt_roteador,
     fewshots_roteador,
@@ -337,15 +354,85 @@ prompt_agenda = ChatPromptTemplate.from_messages([
     MessagesPlaceholder("agent_scratchpad"),
 ]).partial(today_local=today.isoformat())
 
-while True:
-    user_input = input("> ")
-    if user_input.lower() in ('sair', 'exit', 'quit', 'tchau'):
-        break
-    try:
-        resposta = chain.invoke(
-            {"input": user_input},
-            config={"configurable": {"session_id": "PRECISA_MAS_NÃO_IMPORTA"}}
+
+# --------------- Criação dos agents e chains ---------------
+
+# Router não usa tools, apenas roteia
+router_chain = RunnableWithMessageHistory(
+    prompt_roteador | llm_fast | StrOutputParser(),
+    get_session_history=get_session_history,
+    input_messages_key="input",
+    history_messages_key="chat_history"
+)
+
+agent_financeiro = create_tool_calling_agent(llm, TOOLS, prompt_financeiro)
+financeiro_executor_base = AgentExecutor(
+    agent=agent_financeiro,
+    tools=TOOLS
+)
+chain_financeiro = RunnableWithMessageHistory(
+    financeiro_executor_base,
+    get_session_history=get_session_history,
+    input_messages_key="input",
+    history_messages_key="chat_history"
+)
+
+agent_agenda = create_tool_calling_agent(llm_fast, TOOLS, prompt_agenda)
+agenda_executor_base = AgentExecutor(
+    agent=agent_agenda,
+    tools=TOOLS
+)
+agenda_chain = RunnableWithMessageHistory(
+    agenda_executor_base,
+    get_session_history=get_session_history,
+    input_messages_key="input",
+    history_messages_key="chat_history"
+)
+
+orquestrador_chain = RunnableWithMessageHistory(
+    prompt_orquestrador | llm_fast | StrOutputParser(),
+    get_session_history=get_session_history,
+    input_messages_key="input",
+    history_messages_key="chat_history"
+)
+
+def executar_fluxo_acessor(pergunta_usuario: str, session_id: str) -> str:
+    
+    chain = router_chain.invoke(
+        {"input": pergunta_usuario},
+        config={"configurable": {"session_id": session_id}}
+    )
+
+    if "ROUTE=financeiro" in chain:
+        especialista_input = "\n".join(line for line in chain.splitlines() if line.startswith(("ROUTE=", "PERGUNTA_ORIGINAL=", "PERSONA=", "CLARIFY=")))
+        especialista_output = chain_financeiro.invoke(
+            {"input": especialista_input},
+            config={"configurable": {"session_id": session_id}}
         )
-        print(resposta['output'])
+    elif "ROUTE=agenda" in chain:
+        especialista_input = "\n".join(line for line in chain.splitlines() if line.startswith(("ROUTE=", "PERGUNTA_ORIGINAL=", "PERSONA=", "CLARIFY=")))
+        especialista_output = agenda_chain.invoke(
+            {"input": especialista_input},
+            config={"configurable": {"session_id": session_id}}
+        )
+    else:
+        # resposta direta do roteador (saudação ou fora de escopo)
+        return chain
+
+while True:
+    try:
+        user_input = input("> ")
+        if user_input.lower() in ('sair', 'exit', 'quit', 'tchau'):
+            print("Encerrando a conversa.")
+            break
+
+        resposta = executar_fluxo_acessor(
+            pergunta_usuario=user_input,
+            session_id="PRECISA_MAS_NÃO_IMPORTA"
+        )
+
+        print(resposta)
+
     except Exception as e:
         print("Erro ao consumir a API: ", e)
+        continue

@@ -13,7 +13,7 @@ from langchain_core.prompts import (
 )
 from langchain.prompts.few_shot import FewShotChatMessagePromptTemplate
 from langchain.agents import create_tool_calling_agent, AgentExecutor
-from pg_tools import TOOLS
+from aulas.pg_tools import TOOLS
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
