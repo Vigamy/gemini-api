@@ -1,0 +1,26 @@
+# Core dependencies
+python-dotenv>=1.0.0
+psycopg2-binary>=2.9.0
+pydantic>=2.0.0
+
+# LangChain ecosystem
+langchain-core>=0.1.0
+langchain-community>=0.0.20
+langchain-google-genai>=1.0.0
+
+# Google AI
+google-generativeai>=0.3.0
+
+# Document processing and vector stores
+pypdf>=3.0.0
+faiss-cpu>=1.7.4
+
+# Text processing
+langchain-text-splitters>=0.0.1
+
+# Date/time handling (usually included in Python 3.9+, but including for compatibility)
+# zoneinfo is built-in for Python 3.9+, for older versions use:
+# backports.zoneinfo>=0.2.1
+
+# Optional: For better performance with FAISS
+# faiss-gpu>=1.7.4  # Use this instead of faiss-cpu if you have GPU support

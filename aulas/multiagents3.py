@@ -4,6 +4,7 @@ import google.generativeai as genai
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.runnables import RunnablePassthrough
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.prompts import (
     ChatPromptTemplate,
@@ -13,9 +14,11 @@ from langchain_core.prompts import (
 )
 from langchain.prompts.few_shot import FewShotChatMessagePromptTemplate
 from langchain.agents import create_tool_calling_agent, AgentExecutor
-from pg_tools import TOOLS
+from tools.pg_tools import TOOLS
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from operator import itemgetter
+from faq_tools import get_faq_context
 
 load_dotenv()
 
@@ -295,13 +298,11 @@ system_prompt_faq = ("system",
 )
 
 prompt_faq = ChatPromptTemplate.from_messages([
-    system_prompt_faq
-    # {
-    #     "human\n"
-    #     "Pergunta do usuários:\n{question}\n\n"
-    #     "CONTEXTO {trechos do document}:\n{context}\n\n"
-    #     "Responda de forma breve, clara e objetiva:"
-    # }
+    system_prompt_faq,
+    ("human", 
+     "Pergunta do usuário:\n{question}\n\n"
+     "CONTEXTO (trechos do documento):\n{context}\n\n"
+     "Responda de forma breve, clara e objetiva:")
 ])
 
 ### Agente orquestrador ####
@@ -395,8 +396,21 @@ prompt_agenda = ChatPromptTemplate.from_messages([
     MessagesPlaceholder("agent_scratchpad"),
 ]).partial(today_local=today.isoformat())
 
+# --------------- Create tool calling ---------------
 
-# --------------- Criação dos agents e chains ---------------
+agent_financeiro = create_tool_calling_agent(llm, TOOLS, prompt_financeiro)
+financeiro_executor_base = AgentExecutor(
+    agent=agent_financeiro,
+    tools=TOOLS
+)
+
+agent_agenda = create_tool_calling_agent(llm_fast, TOOLS, prompt_agenda)
+agenda_executor_base = AgentExecutor(
+    agent=agent_agenda,
+    tools=TOOLS
+)
+
+# --------------- Criação das chains ---------------
 
 # Router não usa tools, apenas roteia
 router_chain = RunnableWithMessageHistory(
@@ -406,11 +420,6 @@ router_chain = RunnableWithMessageHistory(
     history_messages_key="chat_history"
 )
 
-agent_financeiro = create_tool_calling_agent(llm, TOOLS, prompt_financeiro)
-financeiro_executor_base = AgentExecutor(
-    agent=agent_financeiro,
-    tools=TOOLS
-)
 chain_financeiro = RunnableWithMessageHistory(
     financeiro_executor_base,
     get_session_history=get_session_history,
@@ -418,16 +427,19 @@ chain_financeiro = RunnableWithMessageHistory(
     history_messages_key="chat_history"
 )
 
-agent_agenda = create_tool_calling_agent(llm_fast, TOOLS, prompt_agenda)
-agenda_executor_base = AgentExecutor(
-    agent=agent_agenda,
-    tools=TOOLS
-)
 agenda_chain = RunnableWithMessageHistory(
     agenda_executor_base,
     get_session_history=get_session_history,
     input_messages_key="input",
     history_messages_key="chat_history"
+)
+
+faq_chain_core = (
+    RunnablePassthrough.assign(
+        question=itemgetter("input"),
+        context=lambda x: get_faq_context(x["input"]) # busca pergunta por pdf
+    )
+    | prompt_faq | llm_fast | StrOutputParser()
 )
 
 orquestrador_chain = RunnableWithMessageHistory(
@@ -453,6 +465,12 @@ def executar_fluxo_acessor(pergunta_usuario: str, session_id: str) -> str:
     elif "ROUTE=agenda" in chain:
         especialista_input = "\n".join(line for line in chain.splitlines() if line.startswith(("ROUTE=", "PERGUNTA_ORIGINAL=", "PERSONA=", "CLARIFY=")))
         especialista_output = agenda_chain.invoke(
+            {"input": especialista_input},
+            config={"configurable": {"session_id": session_id}}
+        )
+    elif "ROUTE=faq" in chain:
+        especialista_input = "\n".join(line for line in chain.splitlines() if line.startswith(("ROUTE=", "PERGUNTA_ORIGINAL=", "PERSONA=", "CLARIFY=")))
+        especialista_output = faq_chain_core.invoke(
             {"input": especialista_input},
             config={"configurable": {"session_id": session_id}}
         )
