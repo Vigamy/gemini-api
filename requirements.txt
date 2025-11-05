@@ -18,6 +18,9 @@ faiss-cpu>=1.7.4
 # Text processing
 langchain-text-splitters>=0.0.1
 
+# LangGraph for state management and orchestration
+langgraph>=1.0.0
+
 # Date/time handling (usually included in Python 3.9+, but including for compatibility)
 # zoneinfo is built-in for Python 3.9+, for older versions use:
 # backports.zoneinfo>=0.2.1
